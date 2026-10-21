@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use litellm_core_utils::decline::Decline;
 use litellm_llms::Error as LlmError;
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -24,8 +25,8 @@ pub enum Error {
     InvalidRequest(litellm_llms::ErrorDetail),
     #[error("invalid response: {0}")]
     InvalidResponse(litellm_llms::ErrorDetail),
-    #[error("unsupported by the rust path: {0}")]
-    Unsupported(&'static str),
+    #[error(transparent)]
+    Declined(Decline),
     #[error(transparent)]
     Auth(#[from] litellm_auth::Error),
     #[error(transparent)]
@@ -61,11 +62,13 @@ impl Error {
             | Self::MissingField(_)
             | Self::InvalidProvider(_)
             | Self::InvalidRequest(_)
-            | Self::Unsupported(_)
             | Self::Headers(_) => true,
             Self::Auth(error) => !error.is_missing_credential(),
             Self::Http(error) => error.is_request(),
-            Self::InvalidResponse(_) | Self::Secret(_) | Self::PostCallHook(_) => false,
+            Self::Declined(_)
+            | Self::InvalidResponse(_)
+            | Self::Secret(_)
+            | Self::PostCallHook(_) => false,
         }
     }
 
@@ -73,8 +76,28 @@ impl Error {
         matches!(self, Self::Auth(error) if error.is_missing_credential())
     }
 
-    pub fn is_unsupported(&self) -> bool {
-        matches!(self, Self::Unsupported(_))
+    pub fn declined(&self) -> Option<&Decline> {
+        match self {
+            Self::Declined(decline) => Some(decline),
+            Self::InvalidType { .. }
+            | Self::MissingField(_)
+            | Self::InvalidProvider(_)
+            | Self::InvalidRequest(_)
+            | Self::InvalidResponse(_)
+            | Self::Auth(_)
+            | Self::Headers(_)
+            | Self::Http(_)
+            | Self::Secret(_)
+            | Self::PostCallHook(_) => None,
+        }
+    }
+
+    pub fn after_send(self) -> Self {
+        match self {
+            already @ Self::InvalidResponse(_) => already,
+            upstream if upstream.upstream_response().is_some() => upstream,
+            other => Self::InvalidResponse(other.to_string().into()),
+        }
     }
 }
 
@@ -89,10 +112,8 @@ impl Error {
 
 impl From<litellm_http::Error> for Error {
     fn from(error: litellm_http::Error) -> Self {
-        // Python drops the caller's copy and prefers a forwarded Authorization
-        // over the signature, so leave the request to it.
         if error.is_computed_header() {
-            return Self::Unsupported("request forwards a header AWS SigV4 computes");
+            return Self::Declined(Decline::new("request forwards a header AWS SigV4 computes"));
         }
         Self::Http(error)
     }
@@ -105,7 +126,7 @@ impl From<LlmError> for Error {
             LlmError::MissingField(field) => Self::MissingField(field),
             LlmError::InvalidRequest(message) => Self::InvalidRequest(message),
             LlmError::InvalidResponse(message) => Self::InvalidResponse(message),
-            LlmError::Unsupported(reason) => Self::Unsupported(reason),
+            LlmError::Declined(decline) => Self::Declined(decline),
             LlmError::Auth(error) => Self::Auth(error),
         }
     }
@@ -138,8 +159,41 @@ impl Eq for SecretError {}
 #[cfg(test)]
 mod tests {
     use super::Error;
+    use litellm_core_utils::decline::Decline;
     use litellm_llms::{Error as LlmError, ErrorDetail};
     use rstest::rstest;
+
+    #[test]
+    fn a_transformation_decline_survives_into_the_route_error() {
+        let decline = Decline::new("unrecognized request parameter");
+        assert_eq!(
+            Error::from(LlmError::Declined(decline)).declined(),
+            Some(&decline)
+        );
+    }
+
+    #[rstest]
+    #[case::declined(Error::Declined(Decline::new("non-text response content block")))]
+    #[case::missing_field(Error::MissingField("usage"))]
+    #[case::invalid_request(Error::InvalidRequest("whatever".into()))]
+    #[case::auth(Error::Auth(litellm_auth::Error::InvalidHeader))]
+    fn errors_after_the_send_are_never_a_decline(#[case] error: Error) {
+        let collapsed = error.after_send();
+        assert!(matches!(collapsed, Error::InvalidResponse(_)));
+        assert_eq!(collapsed.declined(), None);
+    }
+
+    #[test]
+    fn an_upstream_status_stays_as_is_after_the_send() {
+        let upstream = Error::from(litellm_http::Error::upstream(500, "boom".into()));
+        assert_eq!(upstream.clone().after_send(), upstream);
+    }
+
+    #[test]
+    fn a_post_call_hook_failure_is_never_a_decline() {
+        let hook = Error::post_call(Error::Declined(Decline::new("hook")));
+        assert_eq!(hook.declined(), None);
+    }
 
     #[test]
     fn a_missing_api_key_is_the_environment_not_the_request() {
@@ -157,8 +211,7 @@ mod tests {
     #[test]
     fn a_header_the_signer_computes_is_left_to_the_host_on_every_route() {
         let error = Error::from(litellm_http::Error::computed_header("authorization"));
-        assert!(matches!(error, Error::Unsupported(_)), "{error:?}");
-        assert!(error.is_request());
+        assert!(error.declined().is_some(), "{error:?}");
     }
 
     #[rstest]

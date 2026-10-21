@@ -137,27 +137,10 @@ pub(super) async fn execute(
             config
                 .transform_response(provider.model, ProviderChatResponseData { body })
                 .map_err(Error::from)
-                .map_err(as_response_error)
+                .map_err(Error::after_send)
         },
     )
     .await
-}
-
-/// Re-tag an error raised while normalizing a response the provider already
-/// returned.
-///
-/// A config reports the same variants on either side of the call: a missing
-/// field or an unsupported block can mean "this request cannot be translated"
-/// before the request is sent and "this response cannot be normalized" here. Only the
-/// second kind has already been billed, and a host that keeps a reference
-/// implementation must not retry those, so collapse them to one variant that
-/// can only mean the provider was already called.
-pub(super) fn as_response_error(err: Error) -> Error {
-    match err {
-        already @ Error::InvalidResponse(_) => already,
-        upstream if upstream.upstream_response().is_some() => upstream,
-        other => Error::InvalidResponse(other.to_string().into()),
-    }
 }
 
 #[cfg(test)]
@@ -317,23 +300,5 @@ mod tests {
             "{error:?}"
         );
         assert!(interceptors.raw.into_inner().unwrap().is_empty());
-    }
-
-    #[rstest::rstest]
-    fn response_errors_collapse_to_one_variant_that_can_only_mean_already_sent() {
-        for original in [
-            Error::MissingField("usage"),
-            Error::Unsupported("non-text response content block"),
-            Error::InvalidRequest("whatever".to_string().into()),
-            Error::Auth(litellm_auth::Error::InvalidHeader),
-        ] {
-            let label = format!("{original:?}");
-            assert!(
-                matches!(as_response_error(original), Error::InvalidResponse(_)),
-                "{label} must not stay retryable once the provider has answered"
-            );
-        }
-        let upstream = Error::from(litellm_http::Error::upstream(500, "boom".into()));
-        assert_eq!(as_response_error(upstream.clone()), upstream);
     }
 }

@@ -24,6 +24,8 @@ Self::Route(InferenceError::Auth(litellm_auth::Error::MissingApiKey { .. })) => 
 Self::Route(error) if error.is_missing_credential() => StatusCode::UNAUTHORIZED,
 ```
 
+`litellm_inference::Error` adds the route-level ones the boundaries read: `declined()`, `upstream_response()`, `is_request()` and `is_missing_credential()`, see [boundaries](boundaries.md)
+
 Add a predicate when a real caller needs a new distinction, and name it after the fact the caller needs, in the caller's words, not after the variant's spelling. An upper type's predicates call through to the nested error, as in `Self::Http(error) => error.is_request()` and `Self::Auth(error) => error.is_missing_credential()`
 
 A public enum may be matched one level down by the type that owns the variant, such as the gateway matching its own `Unsupported` or the OCR bridge matching `FileRead`. Going a second level down, into a variant of a variant, is what to avoid, the gateway used to do that for `MissingApiKey` and `Unsupported`

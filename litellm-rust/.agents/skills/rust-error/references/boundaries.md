@@ -10,7 +10,8 @@ An error becomes text for someone else in exactly two places, and both are expli
 Both ask a nested error the same questions in the same order
 
 ```rust
-if let Some((status, body)) = error.upstream_response() { the provider's status and body pass through }
+if let Some(reason) = error.declined() { 501 at the gateway, RustBridgeDeclined at the bridge }
+else if let Some((status, body)) = error.upstream_response() { the provider's status and body pass through }
 else if error.is_missing_credential() { 401 at the gateway, RuntimeError at the bridge }
 else if error.is_request() { 400 at the gateway, ValueError at the bridge }
 else { 500 at the gateway, RuntimeError at the bridge }
@@ -19,6 +20,12 @@ else { 500 at the gateway, RuntimeError at the bridge }
 So a new failure in a nested crate only needs the right predicate answers to land correctly on both. If you find yourself adding an arm for your variant at a boundary, check whether a predicate is missing first
 
 The two boundaries are not identical. The gateway has variants of its own for body parsing, an unknown model and an unsupported path, and the OCR bridge has Python parity arms such as `FileNotFoundError` for a missing file. Those arms match the boundary's own variants or the top level of a public enum, never a nested error's variants. A missing API key is 401 at the gateway, `RuntimeError` at the inference bridge and `ValueError` at the OCR bridge, each pinned by a test to what Python's own path does
+
+## Declines
+
+A failure before anything reached the provider is a decline, and `declined()` on the route error names its reason. It means another host may serve the same request as it was received, so each boundary hands it to the host unchanged: the gateway answers 501 and the Python bridge raises `RustBridgeDeclined`, never a public exception or a `ValueError`. See [gateway](gateway.md) and [pyo3](pyo3.md) for each host's side
+
+Anything after the send is terminal, never a decline. `declined()` answers `None` for a response fault and for a post-call hook failure even when the wrapped error was a decline, and a route that transforms the provider's answer collapses its errors the way `as_response_error` in `inference-chat` does, so a decline can never describe a call that was billed. Ask `declined()`, do not match the variant behind it, because that after-send cut lives in the predicate
 
 ## What reaches the client
 

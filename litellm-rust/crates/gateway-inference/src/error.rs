@@ -102,7 +102,7 @@ impl Error {
 }
 
 fn route_status(error: &InferenceError) -> StatusCode {
-    if error.is_unsupported() {
+    if error.declined().is_some() {
         return StatusCode::NOT_IMPLEMENTED;
     }
     if let Some((status, _)) = error.upstream_response() {
@@ -118,9 +118,6 @@ fn route_status(error: &InferenceError) -> StatusCode {
 }
 
 fn ocr_status(error: &OcrError) -> StatusCode {
-    if error.is_unsupported() {
-        return StatusCode::NOT_IMPLEMENTED;
-    }
     if error.is_missing_credential() {
         return StatusCode::UNAUTHORIZED;
     }
@@ -235,6 +232,12 @@ mod tests {
 
     #[rstest]
     #[case::upstream_status(upstream(429, ""), StatusCode::TOO_MANY_REQUESTS)]
+    #[case::declined(
+        Error::Route(InferenceError::from(litellm_http::Error::computed_header(
+            "authorization"
+        ))),
+        StatusCode::NOT_IMPLEMENTED
+    )]
     #[case::rejected_request(Error::Route(InferenceError::InvalidRequest("top_k".into())), StatusCode::BAD_REQUEST)]
     #[case::missing_key(
         Error::Route(InferenceError::Auth(litellm_auth::Error::MissingApiKey {
