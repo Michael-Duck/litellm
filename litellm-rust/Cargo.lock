@@ -3737,6 +3737,7 @@ dependencies = [
  "envy",
  "futures-util",
  "http-body-util",
+ "hyper 1.10.1",
  "hyper-util",
  "litellm-auth-types",
  "litellm-config",
@@ -3757,6 +3758,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "tower",
  "tower-sessions-moka-store",
@@ -7382,6 +7384,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]
