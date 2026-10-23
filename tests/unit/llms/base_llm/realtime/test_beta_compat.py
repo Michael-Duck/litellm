@@ -120,3 +120,14 @@ def test_every_beta_audio_format_survives_the_round_trip_through_ga(beta_format:
     }
 
     assert beta_transcription_session(ga_client_secret)["input_audio_format"] == beta_format
+
+
+def test_a_ga_audio_format_without_a_beta_name_reaches_the_client_unchanged() -> None:
+    unmapped_format: Final[dict[str, JsonValue]] = {"type": "audio/unmapped", "rate": 48000}
+    ga_client_secret: Final[dict[str, JsonValue]] = {
+        "value": "ek_upstream",
+        "expires_at": 1792775579,
+        "session": {"audio": {"input": {"format": unmapped_format}}},
+    }
+
+    assert beta_transcription_session(ga_client_secret)["input_audio_format"] == unmapped_format

@@ -88,6 +88,29 @@ async def test_sdk_fn_mints_an_openai_transcription_session_through_ga_client_se
     assert response.json() == {"id": "sess_1", "client_secret": {"value": "ek_upstream", "expires_at": 1792775579}}
 
 
+@pytest.mark.asyncio
+async def test_an_openai_compatible_provider_mints_its_transcription_session_at_client_secrets():
+    import litellm
+
+    requests: list[httpx.Request] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"value": "ek_upstream"})
+
+    await litellm.acreate_realtime_transcription_session(
+        model="hosted_vllm/whisper",
+        api_base="https://vllm.example",
+        api_key="vllm-key",
+        transcription_session={"input_audio_transcription": {"language": "en"}},
+        client=AsyncHTTPHandler(transport=httpx.MockTransport(upstream)),
+    )
+
+    (request,) = requests
+    assert str(request.url) == "https://vllm.example/v1/realtime/client_secrets"
+    assert request.headers["authorization"] == "Bearer vllm-key"
+
+
 def _gpt_live_transcribe_session() -> dict[str, object]:
     return {"type": "transcription", "audio": {"input": {"transcription": {"model": "gpt-live-transcribe"}}}}
 
