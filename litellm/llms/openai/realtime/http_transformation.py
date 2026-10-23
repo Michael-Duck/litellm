@@ -23,11 +23,6 @@ class OpenAIRealtimeHTTPConfig(BaseRealtimeHTTPConfig):
         base = base.removesuffix("/v1")
         return join_api_base(base, "v1/realtime/calls")
 
-    def get_transcription_session_url(self, api_base: str | None, model: str, api_version: str | None = None) -> str:
-        base = self.get_api_base(api_base).rstrip("/")
-        base = base.removesuffix("/v1")
-        return join_api_base(base, "v1/realtime/transcription_sessions")
-
     def validate_environment(
         self,
         headers: dict,

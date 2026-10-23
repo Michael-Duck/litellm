@@ -714,7 +714,7 @@ class _GatewayThatRecordsTheUrl:
     ("route", "route_kwargs", "path"),
     [
         (realtime_main.acreate_realtime_client_secret, {}, "client_secrets"),
-        (realtime_main.acreate_realtime_transcription_session, {}, "transcription_sessions"),
+        (realtime_main.acreate_realtime_transcription_session, {}, "client_secrets"),
         (realtime_main.arealtime_calls, {"openai_ephemeral_key": "ek_test", "sdp_body": b"v=0"}, "calls"),
     ],
 )

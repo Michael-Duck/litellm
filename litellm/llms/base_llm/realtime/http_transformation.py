@@ -58,12 +58,6 @@ class BaseRealtimeHTTPConfig(ABC):
     def get_complete_url(self, api_base: str | None, model: str, api_version: str | None = None) -> str:
         """Return the full URL for POST /realtime/client_secrets."""
 
-    def get_transcription_session_url(self, api_base: str | None, model: str, api_version: str | None = None) -> str:
-        """Return the full URL for POST /realtime/transcription_sessions."""
-        base = (api_base or "").rstrip("/")
-        base = base.removesuffix("/v1")
-        return join_api_base(base, "v1/realtime/transcription_sessions")
-
     @abstractmethod
     def validate_environment(
         self,

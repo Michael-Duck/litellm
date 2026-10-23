@@ -20,6 +20,7 @@ from litellm.constants import (
     REALTIME_SESSION_SUCCESS_LOGGED_KEY,
 )
 from litellm.litellm_core_utils.logging_worker import GLOBAL_LOGGING_WORKER
+from litellm.llms.base_llm.realtime.beta_compat import ga_audio_format
 from litellm.llms.base_llm.realtime.transformation import BaseRealtimeConfig, RealtimeBackend
 from litellm.types.llms.openai import (
     OpenAIRealtimeEvents,
@@ -336,11 +337,6 @@ class RealTimeStreaming:
         ]
     )
     _CLIENT_AUDIO_BUFFER_COMMIT_TYPES = frozenset(["input_audio_buffer.commit", "input_audio_buffer.end"])
-    _AUDIO_FORMAT_MAP: dict[str, dict[str, str | int]] = {
-        "pcm16": {"type": "audio/pcm", "rate": 24000},
-        "g711_ulaw": {"type": "audio/G711-ulaw", "rate": 8000},
-        "g711_alaw": {"type": "audio/G711-alaw", "rate": 8000},
-    }
     # GA name → beta name (when client WebSocket includes OpenAI-Beta: realtime=v1)
     _GA_TO_BETA_EVENT_TYPES: dict[str, str] = {
         "conversation.item.added": "conversation.item.created",
@@ -1378,13 +1374,17 @@ class RealTimeStreaming:
 
         # input_audio_format → audio.input.format
         if "input_audio_format" in session:
-            raw = session.pop("input_audio_format")
-            inp["format"] = RealTimeStreaming._AUDIO_FORMAT_MAP.get(raw, raw) if isinstance(raw, str) else raw
+            beta_input_format: Final = session.pop("input_audio_format")
+            inp["format"] = (
+                ga_audio_format(beta_input_format) if isinstance(beta_input_format, str) else beta_input_format
+            )
 
         # output_audio_format → audio.output.format
         if "output_audio_format" in session:
-            raw = session.pop("output_audio_format")
-            out["format"] = RealTimeStreaming._AUDIO_FORMAT_MAP.get(raw, raw) if isinstance(raw, str) else raw
+            beta_output_format: Final = session.pop("output_audio_format")
+            out["format"] = (
+                ga_audio_format(beta_output_format) if isinstance(beta_output_format, str) else beta_output_format
+            )
 
         # turn_detection → audio.input.turn_detection
         if "turn_detection" in session:
