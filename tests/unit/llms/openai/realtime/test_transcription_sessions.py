@@ -4,6 +4,7 @@ Tests for the Realtime transcription_sessions surface used by gpt-realtime-whisp
   - the beta transcription_sessions shape minted through GA client_secrets
 """
 
+import email
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -85,6 +86,53 @@ async def test_sdk_fn_mints_an_openai_transcription_session_through_ga_client_se
         "session": {"type": "transcription", "audio": {"input": {"transcription": {"model": "gpt-realtime-whisper"}}}}
     }
     assert response.json() == {"id": "sess_1", "client_secret": {"value": "ek_upstream", "expires_at": 1792775579}}
+
+
+def _gpt_live_transcribe_session() -> dict[str, object]:
+    return {"type": "transcription", "audio": {"input": {"transcription": {"model": "gpt-live-transcribe"}}}}
+
+
+def _multipart_session(request: httpx.Request) -> object:
+    multipart = email.message_from_bytes(
+        f"Content-Type: {request.headers['content-type']}\r\n\r\n".encode() + request.content
+    )
+    (session,) = (
+        part for part in multipart.get_payload() if part.get_param("name", header="content-disposition") == "session"
+    )
+    return json.loads(session.get_payload())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "session", "expected_session"),
+    [
+        ("openai/gpt-live-transcribe", _gpt_live_transcribe_session(), _gpt_live_transcribe_session()),
+        ("openai/gpt-realtime", {"type": "realtime"}, {"type": "realtime", "model": "gpt-realtime"}),
+    ],
+)
+async def test_sdp_exchange_names_a_top_level_model_only_for_realtime_sessions(
+    monkeypatch, model, session, expected_session
+):
+    import litellm
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-unit-test")
+    requests: list[httpx.Request] = []
+
+    def openai(request: httpx.Request) -> httpx.Response:
+        request.read()
+        requests.append(request)
+        return httpx.Response(201, text="v=0")
+
+    await litellm.arealtime_calls(
+        openai_ephemeral_key="ek_upstream",
+        sdp_body=b"v=0",
+        model=model,
+        session=session,
+        client=AsyncHTTPHandler(transport=httpx.MockTransport(openai)),
+    )
+
+    (request,) = requests
+    assert _multipart_session(request) == expected_session
 
 
 def test_append_query_params_skips_existing_keys():

@@ -348,6 +348,13 @@ def _signed_body_kwargs(*, signed_body: bytes | None, data: dict[str, object]) -
     return {"json": data}
 
 
+def _sdp_exchange_session(session_config: Mapping[str, object] | None, model: str | None) -> dict[str, object]:
+    session: Final = {"type": "realtime", **(session_config or {})}
+    if not model or session["type"] != "realtime":
+        return session
+    return {"model": model, **session}
+
+
 def _google_genai_streaming_hidden_params(
     *,
     api_base: str,
@@ -6946,12 +6953,7 @@ class BaseLLMHTTPHandler:
         if extra_headers:
             headers.update(extra_headers)
 
-        # Build multipart form data: sdp + session JSON
-        session_data: Final = session_config or {}
-        if "type" not in session_data:
-            session_data["type"] = "realtime"
-        if "model" not in session_data and model:
-            session_data["model"] = model
+        session_data: Final = _sdp_exchange_session(session_config, model)
 
         sdp_text: Final = sdp_body.decode("utf-8") if isinstance(sdp_body, bytes) else sdp_body
 
