@@ -3,6 +3,7 @@ use axum::{
     Json,
     response::{IntoResponse, Response},
 };
+use litellm_core_utils::decline::Decline;
 use litellm_inference::Error as InferenceError;
 use litellm_llms::base_llm::ocr::error::Error as OcrError;
 use serde_json::{Map, Value, json};
@@ -21,8 +22,6 @@ pub enum Error {
     Route(#[from] InferenceError),
     #[error(transparent)]
     Ocr(#[from] OcrError),
-    #[error("{0} is not implemented by the Rust gateway")]
-    Unsupported(String),
     #[error("request body exceeds the size limit")]
     BodyTooLarge,
     #[error("{0}")]
@@ -48,12 +47,23 @@ impl Error {
     pub fn status(&self) -> StatusCode {
         match self {
             Self::Auth(error) => error.status(),
-            Self::Unsupported(_) => StatusCode::NOT_IMPLEMENTED,
             Self::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             Self::InvalidBody(_) | Self::UnknownModel(_) => StatusCode::BAD_REQUEST,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Ocr(error) => ocr_status(error),
             Self::Route(error) => route_status(error),
+        }
+    }
+
+    pub fn declined(&self) -> Option<&Decline> {
+        match self {
+            Self::Route(error) => error.declined(),
+            Self::Auth(_)
+            | Self::InvalidBody(_)
+            | Self::UnknownModel(_)
+            | Self::Ocr(_)
+            | Self::BodyTooLarge
+            | Self::Internal(_) => None,
         }
     }
 
@@ -63,16 +73,26 @@ impl Error {
             Self::UnknownModel(model) => format!("Invalid model name passed in model={model}"),
             _ => self.to_string(),
         };
-        (
-            status,
-            Json(json!({"error": {
-                "message": message,
-                "type": error_type(status),
-                "param": null,
-                "code": status.as_u16(),
-            }})),
-        )
-            .into_response()
+        self.respond(json!({"error": {
+            "message": message,
+            "type": error_type(status),
+            "param": null,
+            "code": status.as_u16(),
+        }}))
+    }
+
+    pub fn anthropic_response(self, request_id: Option<&str>) -> Response {
+        let body = self.body(request_id);
+        self.respond(body)
+    }
+
+    /// A decline rides on the response, so the dispatch layer can hand the request on.
+    fn respond(&self, body: Value) -> Response {
+        let mut response = (self.status(), Json(body)).into_response();
+        if let Some(decline) = self.declined() {
+            response.extensions_mut().insert(*decline);
+        }
+        response
     }
 
     /// The Anthropic error envelope Python's `AnthropicExceptionMapping` builds: an upstream
