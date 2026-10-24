@@ -795,3 +795,44 @@ async def test_generic_api_concurrent_flushes_deliver_each_event_once(log_format
             task.cancel()
         await asyncio.gather(*owned_tasks, return_exceptions=True)
         await handler.close()
+
+
+_CALLBACK_COMPLETION_BUDGET_SECONDS: Final = 2.0
+
+
+@pytest.mark.asyncio
+async def test_generic_api_callback_does_not_wait_for_the_logging_endpoint() -> None:
+    """
+    The success and failure callbacks run in LiteLLM's logging worker, which cancels any
+    callback that runs longer than LOGGING_WORKER_MAX_TIME_PER_COROUTINE. A callback that
+    waits for the logging endpoint is cancelled while the send is still in flight, and the
+    batch is removed from the queue even though it never reached the endpoint, so the
+    queued events are lost.
+    """
+    sink: Final = _InProcessLogSink(hold_first=True)
+    handler: Final = AsyncHTTPHandler(transport=httpx.MockTransport(sink.respond))
+    before_tasks: Final = frozenset(asyncio.all_tasks())
+    logger: Final = GenericAPILogger(
+        endpoint="https://owned-logger.invalid",
+        async_httpx_client=handler,
+        batch_size=1,
+        flush_interval=3600,
+    )
+    owned_tasks: Final = frozenset(asyncio.all_tasks()) - before_tasks
+    try:
+        before_callback: Final = frozenset(asyncio.all_tasks())
+        callback: Final = asyncio.create_task(
+            logger.async_log_success_event({"standard_logging_object": {"id": "queued"}}, None, None, None)
+        )
+        await asyncio.wait_for(sink.arrived.wait(), timeout=5)
+        await asyncio.wait_for(callback, timeout=_CALLBACK_COMPLETION_BUDGET_SECONDS)
+        sink.release.set()
+        send_tasks: Final = frozenset(asyncio.all_tasks()) - before_callback - owned_tasks
+        await asyncio.wait_for(asyncio.gather(*send_tasks), timeout=5)
+        assert tuple(_received_log_ids(sink.requests, "json_array")) == ("queued",)
+    finally:
+        sink.release.set()
+        for task in owned_tasks:
+            task.cancel()
+        await asyncio.gather(*owned_tasks, return_exceptions=True)
+        await handler.close()

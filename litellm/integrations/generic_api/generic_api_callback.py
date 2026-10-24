@@ -315,7 +315,7 @@ class GenericAPILogger(CustomBatchLogger):
                 self.log_queue.append(standard_logging_payload)
 
             if len(self.log_queue) >= self.batch_size:
-                await self.async_send_batch()
+                self._send_batch_in_background()
 
         except Exception as e:
             verbose_logger.exception("Generic API Logger Error - %s\n%s", e, traceback.format_exc())
@@ -346,10 +346,21 @@ class GenericAPILogger(CustomBatchLogger):
                 self.log_queue.append(standard_logging_payload)
 
             if len(self.log_queue) >= self.batch_size:
-                await self.async_send_batch()
+                self._send_batch_in_background()
 
         except Exception as e:
             verbose_logger.exception("Generic API Logger Error - %s\n%s", e, traceback.format_exc())
+
+    def _send_batch_in_background(self) -> None:
+        """
+        Send the queued batch without blocking the caller.
+
+        The success and failure callbacks run in LiteLLM's logging worker, which cancels
+        any callback that runs longer than LOGGING_WORKER_MAX_TIME_PER_COROUTINE. Awaiting
+        the send in the callback drops the batch when the endpoint is slow, because the
+        batch is removed from the queue even when the send never completed.
+        """
+        asyncio.create_task(self.async_send_batch())
 
     async def flush_queue(self) -> None:
         await self.async_send_batch()
